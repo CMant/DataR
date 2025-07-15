@@ -1,4 +1,4 @@
-# DataR
+# DataR：比DataX更块，更小，更灵活的迁移工具
 <img width="558" height="546" alt="1111" src="https://github.com/user-attachments/assets/b538b76c-06e8-4d22-9f9e-19cb550343e8" />
 
 #项目说明  
