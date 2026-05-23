@@ -22,14 +22,14 @@
 
 
 在pod镜像中已经提供了使用说明和脚本示例
- start.py  开启一个任务
- adj_speed.py  调整任务速度
- delete.py   根据返回的task_pid 去kill 任务
+   start.py  开启一个任务
+   adj_speed.py  调整任务速度
+   delete.py   根据返回的task_pid 去kill 任务
 
 start.py:
-使用什么语言编写都可以，只要向DataR发送task_lines 中的任务字符串即可。migrate_type 修改数据迁移方式，比如pg_to_pg pg_to_mysql pg_to_file
-你也可以编写自己的迁移方式，将它编译成.so 放到lib中。然后migrate_type 中填写你主函数的名称即可调用。
-任务的管理时以task_name 做区分的，在内部构建了任务链表。在开启任务时，要保证任务的名称不重复。
+  使用什么语言编写都可以，只要向DataR发送task_lines 中的任务字符串即可。migrate_type 修改数据迁移方式，比如pg_to_pg pg_to_mysql pg_to_file
+  你也可以编写自己的迁移方式，将它编译成.so 放到lib中。然后migrate_type 中填写你主函数的名称即可调用。
+  任务的管理时以task_name 做区分的，在内部构建了任务链表。在开启任务时，要保证任务的名称不重复。
 
  task_lines = [
     "--create",
@@ -54,17 +54,14 @@ start.py:
 ]            
              
 addtask = "\n".join(task_lines)
-# =================================================================
-             
-# 发送命令           
+         
 print("==== 发送任务 ====\n", addtask)
 c.send(addtask.encode('utf-8'))
              
-# ===================== 循环接收，不退出！=====================
 print("\n==== 等待服务端回复 ====\n")
 while True:  
-    recv_data = c.recv(2048)  # 一直等消息
-    if not recv_data:         # 服务端关闭连接才退出
+    recv_data = c.recv(2048) 
+    if not recv_data:         
         print("\n✅ 服务端已断开连接，任务结束")
         break
              
@@ -75,33 +72,21 @@ c.close()
 #######################################################################
 adjust_speed.py  调整任务速度task_speed 越大越慢，=0时不限速。
 
+
 import socket
-
-# 创建客户端 socket
 c = socket.socket()
-
-# 服务端地址
 host = '192.168.227.132'
 port = 1234
 c.connect((host, port))
-
-# ===================== 任务配置（清爽易读版） =====================
 task_lines = [
     "--adjust",
     "[DATAR]",
     "task_name=topic3",
     "task_speed=1000"
- 
 ]
-
 addtask = "\n".join(task_lines)
-# =================================================================
-
-# 发送命令
 print("==== 发送任务 ====\n", addtask)
 c.send(addtask.encode('utf-8'))
-
-# ===================== 循环接收，不退出！=====================
 print("\n==== 等待服务端回复 ====\n")
 while True:
     recv_data = c.recv(2048)  # 一直等消息
@@ -112,7 +97,7 @@ while True:
     print(recv_data.decode('utf-8').strip())
 
 c.close()
-
+#######################################################################
 
 
 以下是该项目的说明
