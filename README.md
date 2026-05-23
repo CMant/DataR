@@ -1,14 +1,126 @@
-# DataR：比DataX更快，更小，更灵活的ETL迁移工具
+# DataR：地表最强数据同步工具
+比DataX更快，更小，更灵活的ETL迁移工具
+
 <img width="558" height="546" alt="1111" src="https://github.com/user-attachments/assets/b538b76c-06e8-4d22-9f9e-19cb550343e8" />
 
-#项目说明  
-目前仅支持pg_to_pg,pg_to_mysql 两种方式。
+源代码已撤回，此处提供pod下载。
+通过网盘分享的文件：DataR.tar
+链接: https://pan.baidu.com/s/1HTIbCyYkqEf0qO_tV3t6oA?pwd=data 提取码: data
 
+#项目说明  
+目前支持pg_to_pg,pg_to_mysql,pg_to_file 3种方式。纯C实现，大量代码优化，它不是实时cdc。是需要你向DataR发送 select a,b,c from table_name where a=1 ... 之类的sql语句进行迁移的工具。
+使用pg连接协议的国产数据一样支持，比如kingbase。
+
+适用场景：
+ 1 无法实现实时cdc的场景。可以编写脚本不停变换where 条件达到“实时”的效果。
+ 2 开发团队需要的生产<->开发<->UAT 数据库之间数据导入导出。
+ 3 小批量数据备份，比如要update 500行数据。可以先使用 pg_to_file 的方式将数据导出成inert 的sql文件。
+ 4 支持实时调速，在生产环境使用时，可以根据服务器负载情况动态调整迁移速度，避免对服务器造成太大的压力。
+特点：
+ 1 纯C代码实现，libpq接口，使用single-row模式抽取数据，返回数据再大也不会对服务器产生瞬时大压力。代码效率top1。和阿里的datax相比，遥遥领先（...）
+ 2 配置文件简单
+
+
+在pod镜像中已经提供了使用说明和脚本示例
+ start.py  开启一个任务
+ adj_speed.py  调整任务速度
+ delete.py   根据返回的task_pid 去kill 任务
+
+start.py:
+使用什么语言编写都可以，只要向DataR发送task_lines 中的任务字符串即可。migrate_type 修改数据迁移方式，比如pg_to_pg pg_to_mysql pg_to_file
+你也可以编写自己的迁移方式，将它编译成.so 放到lib中。然后migrate_type 中填写你主函数的名称即可调用。
+任务的管理时以task_name 做区分的，在内部构建了任务链表。在开启任务时，要保证任务的名称不重复。
+
+ task_lines = [
+    "--create",
+    "[DATAR]",
+    "task_name=topic1",
+    "source_host=192.168.227.128",
+    "source_dbname=test",
+    "source_port=54321",
+    "source_username=system",
+    "source_password=111111",
+    "dest_host=192.168.227.128",
+    "dest_port=54321",
+    "dest_username=system",
+    "dest_password=111111",
+    "dest_dbname=test",
+    "dest_table=tast_table1",
+    "pump_sql=select * from test_table2",
+    "task_speed=0",
+    "parallel_thread_per_task=10",
+    "send_buffer_size=64",
+    "migrate_type=pg_to_pg"
+]            
+             
+addtask = "\n".join(task_lines)
+# =================================================================
+             
+# 发送命令           
+print("==== 发送任务 ====\n", addtask)
+c.send(addtask.encode('utf-8'))
+             
+# ===================== 循环接收，不退出！=====================
+print("\n==== 等待服务端回复 ====\n")
+while True:  
+    recv_data = c.recv(2048)  # 一直等消息
+    if not recv_data:         # 服务端关闭连接才退出
+        print("\n✅ 服务端已断开连接，任务结束")
+        break
+             
+    print(recv_data.decode('utf-8').strip())
+             
+c.close() 
+
+#######################################################################
+adjust_speed.py  调整任务速度task_speed 越大越慢，=0时不限速。
+
+import socket
+
+# 创建客户端 socket
+c = socket.socket()
+
+# 服务端地址
+host = '192.168.227.132'
+port = 1234
+c.connect((host, port))
+
+# ===================== 任务配置（清爽易读版） =====================
+task_lines = [
+    "--adjust",
+    "[DATAR]",
+    "task_name=topic3",
+    "task_speed=1000"
+ 
+]
+
+addtask = "\n".join(task_lines)
+# =================================================================
+
+# 发送命令
+print("==== 发送任务 ====\n", addtask)
+c.send(addtask.encode('utf-8'))
+
+# ===================== 循环接收，不退出！=====================
+print("\n==== 等待服务端回复 ====\n")
+while True:
+    recv_data = c.recv(2048)  # 一直等消息
+    if not recv_data:         # 服务端关闭连接才退出
+        print("\n✅ 服务端已断开连接，任务结束")
+        break
+    
+    print(recv_data.decode('utf-8').strip())
+
+c.close()
+
+
+
+以下是该项目的说明
 
 DataX的目的是为了工作，而DataR的目的是为了干死DataX。
 
 这个项目是我在读研期间完成的。我对计算机，操作系统和数据库的理解，基本就在这个项目上。
-研究生毕业了，工作找不到，我就把这个项目开源了，核心算法部分做成了.so。不好意思，舍不得开出来。其他的都是一些零零碎碎的辅助功能，代码遍地是。
+
 
 注意：DataR仅仅是个核心程序，它只负责“尽快完成数据抽取、转换和写入”的任务，其他任务分发，权限管理等等都没有，这些功能很简单，我给DataR设计了几个命令接口，bash，python都能够完成。
 可以做成ETL集群的模式，自己去写任务调动，节点注册登记，根据服务器负载自动派发任务。。。。这些都不难都不难的。
@@ -66,59 +178,10 @@ DataR:
 ![微信图片_20230517080003](https://github.com/user-attachments/assets/33ad6eb9-f946-4716-b254-587d9a57c241)  
 
 
-#安装  
 
-```bash
-apt-get install libglib2.0-dev
-apt-get install libpq-dev
-#mysql包
-wget https://repo.mysql.com//mysql-apt-config_0.8.34-1_all.deb
-dpkg -i mysql-apt-config_0.8.34-1_all.deb
-apt install libmysqlclient-dev
-make
-```
-生成DataR文件直接运行即可。
 
 DataR.ini是配置文件，支持center模式和standalone。
 center：构建大规模的ETL服务集群，datarnode启动时需要向center进行登记注册，不填写center服务器无法启动。center对登记的服务器可以进行状态监控（center服务器很简单的，自己拿python写写就行啦。）
 standalone：自己就是个独立的ETL服务器，启动就能开始接收网络命令。
 
-发送任务：
-测试模块，通过socket向DataR发送命令即可，你必须给这次迁移任务起个名字，taskname。调速，任务暂停，kill都需要根据这个任务名字来。
- ```python
-import socket #导入socket 模块
 
-c = socket.socket()  #创建socket对象
-
-host = '192.168.174.128'  #设置DataR
-
-port = 1234 #设置DataR接收端口
-
-c.connect((host,port))
-
-addtask="--create \n[DATAR]\n%s \n%s \n%s \n%s \n%s \n%s \n%s\n%s\n%s\n%s \n%s"%('taskname=topic1','sourcehost=192.168.1.68' ,'sourcedbname=postgres' ,\'sourceuser=postgres' ,'sourcepassword=postgres' ,'pumpsql=select * from M_table ','taskspeed=0', 'row_size=1','max_tuple_size=1','parallel_thread_per_task=10','send_buffer_size=20480')
-c.send(addtask.encode('utf-8'))
-recv_data=c.recv(2048)
-print("xxxxxxx"+recv_data.decode('utf-8'))
-c.close()
-```
-
-调速
-```python
-import socket #导入socket 模块
-taskname='task_name=topic1'
-taskspeed='1000000'
-#taskspeed单位是ms，这样可调范围更多
-adjspeed="--adjust\n[DATAR]\n%s\n%s"%(taskname,taskspeed)
-#print(adjspeed)
-c = socket.socket()  #创建socket对象
-host = '192.168.1.3'  #设置本地主机
-port = 1234 #设置端口号
-c.connect((host,port))
-c.send(adjspeed.encode('utf-8'))
-recv_data=c.recv(2048)
-print("xxxxxxx"+recv_data.decode('utf-8'))
-c.close()
-```
-kill任务
-创建任务的时候会返回一个进程号，你需要通过脚本对进程号进行记录，后面通过paramiko之类的包进行连接kill即可。
