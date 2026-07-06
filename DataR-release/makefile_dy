@@ -1,0 +1,56 @@
+# ================================
+# 基础配置
+# ================================
+IDIR    := include
+CC      := gcc
+CFLAGS  := -Wall -Wextra -std=gnu99 -I$(IDIR)
+LDFLAGS := -L. -Wl,-rpath='$$ORIGIN' -rdynamic
+LDLIBS  := -ldl -lpthread 
+
+# 包依赖
+PKG_CFLAGS := $(shell pkg-config --cflags glib-2.0   libpq mysqlclient)
+PKG_LDLIBS := $(shell pkg-config --libs   glib-2.0   libpq mysqlclient)
+
+# 合并参数
+CFLAGS  += $(PKG_CFLAGS)
+LDLIBS  += $(PKG_LDLIBS)
+
+# 目标文件
+TARGET  := DataR
+OBJ     := common.o \
+           ctl_command.o \
+           speed_adj.o \
+           pg_to_pg.o \
+           read_from_db.o \
+           network_service.o \
+           DataR.o \
+           init_check.o
+
+# 自动生成头文件依赖
+DEPS    := $(patsubst %.o,%.d,$(OBJ))
+
+# ================================
+# 最终目标
+# ================================
+$(TARGET): $(OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+# ================================
+# 通用编译规则（自动推导，无需每个写）
+# ================================
+%.o: %.c %.d
+	$(CC) -c $< -o $@ $(CFLAGS)
+
+# 自动生成依赖
+%.d: %.c
+	$(CC) -MM $< $(CFLAGS) > $@
+
+# 包含依赖
+-include $(DEPS)
+
+# ================================
+# 清理
+# ================================
+.PHONY: clean
+clean:
+	rm -f $(OBJ) $(DEPS) $(TARGET)
