@@ -12,12 +12,17 @@
 #include <dlfcn.h>  // 必须加
 
 // 函数指针类型（你原来应该有）
-typedef int (*MigrateFunc)(TASK_INF, int);
+typedef int (*MigrateFunc)( int);
 
-int Read_from_DB(TASK_INF task_info, int acceptSockfd)
+int Read_from_DB( int acceptSockfd)
 {
-    char *func_name = task_info.migrate_type;
+    const char *tmp;
 
+    tmp = get_cfg("migrate_type");
+   
+
+    //char *func_name = task_info.migrate_type;
+    char *func_name= tmp ? g_strdup(tmp) : NULL;
     if (!func_name || strlen(func_name) == 0) {
         fprintf(stderr,"错误：迁移类型不能为空\n");
         return -1;
@@ -47,8 +52,8 @@ int Read_from_DB(TASK_INF task_info, int acceptSockfd)
 
     // ===================== 执行函数 =====================
     printf("正在执行函数：%s()\n", func_name);
-    int ret = func(task_info, acceptSockfd);
-
+    int ret = func(acceptSockfd);
+ 
     // 关闭库
     dlclose(lib_handle);
     return ret;

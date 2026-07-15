@@ -22,12 +22,12 @@ extern char *DataR_node_name;
 char recv_center_ack[1024] = {0};
 
 // 外部依赖声明
-extern char *trim(char *str);
+//extern char *trim(char *str);
 
 
  
 
-int is_shm_exist(const char *taskname){
+static int is_shm_exist(const char *taskname){
     if (!taskname || strlen(taskname) == 0){
         return 0;
     }
@@ -43,6 +43,97 @@ int is_shm_exist(const char *taskname){
 //=====================================================
 // 安全获取 glib 配置项 自动释放、判空、去空格
 //=====================================================
+
+// 全局哈希表，存放所有动态配置key-value
+GHashTable *g_task_config = NULL;
+
+
+
+
+
+
+
+
+
+//=====================================================
+// 创建任务
+//=====================================================
+static int create_Task(const char *ctl_message,int acceptSockfd)
+{
+
+        if (!ctl_message)
+    {
+        fprintf(stderr, "[ERROR] ctl_message is NULL\n");
+        return -1;
+    }
+    const char* cfg_data = ctl_message + 9;
+    
+    int ret = parse_config_text(cfg_data);
+   
+    if (ret != 0)
+    {
+        ReplyToClient(acceptSockfd,"[ERROR] 任务配置解析失败\n");
+        return -1;
+    }
+
+    const char* task_name = get_cfg("task_name");
+    if (!task_name || strlen(task_name) == 0)
+    {
+        fprintf(stderr, "[ERROR] task_name 配置缺失\n");
+        ReplyToClient(acceptSockfd, "[ERROR] task_name 不能为空");
+        return -1;
+    }
+    if (is_shm_exist(task_name))
+    {
+        fprintf(stderr, "[ERROR] 任务 %s 已存在\n", task_name);
+        ReplyToClient(acceptSockfd, "[ERROR] 同名任务已存在");
+        return -1;
+    }
+
+    // TASK_INF task_info = {0};
+    // fill_task_info(&task_info);
+    // printf("%d\n",atoi(task_info.task_speed));
+    // exit(0);
+
+
+
+
+    pid_t process_pid=getpid();
+    // 设置调速
+    int speed_val = atoi(get_cfg("task_speed"));
+    //Set_sleepValue(speed_val, get_cfg("task_name"));
+    fast_table_set_pid(get_cfg("task_name"), speed_val,process_pid);    
+    char responsepid[16]  = {0};
+    char START_MESSAGE[1024] = {0};
+    snprintf(responsepid, sizeof(responsepid), "%d", process_pid);
+    snprintf(START_MESSAGE, sizeof(START_MESSAGE), "%s_%s_%s_%s\n",
+             TASK_CREATE_OK, get_cfg("task_name"), responsepid, DataR_node_name);
+    ReplyToClient(acceptSockfd,START_MESSAGE);    
+   
+
+    
+    if (0 == Read_from_DB(acceptSockfd))
+    {
+        
+        //snprintf(replay_message, 1024, "%s_%s_%s_%s",task_info.task_name, responsepid, DataR_node_name);
+        //Del_sleep_tag(task_info.task_name);
+        fast_table_del( get_cfg("task_name"),process_pid);
+     
+    
+    }
+    else
+    {
+        
+        ReplyToClient(acceptSockfd,"核心函数运行错误！\n");  
+        return -1;
+    }
+    printf("%s任务结束。\n", get_cfg("task_name"));
+    //clean:
+    //g_key_file_free(cfg);
+    return 0;
+}
+
+
 static char* safe_get_config_str(GKeyFile *cfg, const char *key)
 {
     if (!cfg || !key) {
@@ -78,126 +169,6 @@ static char* safe_get_config_str(GKeyFile *cfg, const char *key)
     
     
     return ret; // 返回安全内存，调用者必须 free
-}
-
-//=====================================================
-// 创建任务
-//=====================================================
-static int create_Task(const char *ctl_message,int acceptSockfd)
-{
-    if (!ctl_message)
-    {
-        return -1;
-    }
-    ctl_message += 9;
-
-    GError *err = NULL;
-    GKeyFile *cfg = g_key_file_new();
-
-    if (!g_key_file_load_from_data(cfg, ctl_message, -1, G_KEY_FILE_NONE, &err))
-    {
-        fprintf(stderr,"[ERROR] 任务配置解析失败\n");
-        ReplyToClient(acceptSockfd,"[ERROR] 任务配置解析失败\n");  
-        if (err)
-        {
-            g_error_free(err);
-        }
-        g_key_file_free(cfg);
-        return -1;
-    }
-
-    // 结构体清零
-    TASK_INF task_info = {0};
-
-    // 逐个读取 + 强校验
-    
- 
-
-    task_info.task_name        = safe_get_config_str(cfg, "task_name");
-    if (is_shm_exist(task_info.task_name ))
-        {
-            
-            return -1;
-        }
-
-    task_info.migrate_type     = safe_get_config_str(cfg, "migrate_type");    
-    task_info.source_host      = safe_get_config_str(cfg, "source_host");
-    task_info.source_port      = safe_get_config_str(cfg, "source_port");
-    task_info.source_dbname    = safe_get_config_str(cfg, "source_dbname");
-    task_info.source_username   = safe_get_config_str(cfg, "source_username");
-    task_info.source_password   = safe_get_config_str(cfg, "source_password");
-    task_info.dest_host        = safe_get_config_str(cfg, "dest_host");
-    task_info.dest_port        = safe_get_config_str(cfg, "dest_port");
-    task_info.dest_dbname      = safe_get_config_str(cfg, "dest_dbname");
-    task_info.dest_username    = safe_get_config_str(cfg, "dest_username");
-    task_info.dest_password    = safe_get_config_str(cfg, "dest_password");
-    task_info.dest_table       = safe_get_config_str(cfg, "dest_table");
-    task_info.task_speed       = safe_get_config_str(cfg, "task_speed");
-    task_info.pump_sql         = safe_get_config_str(cfg, "pump_sql");
-    //task_info.row_size         = safe_get_config_str(cfg, "row_size");
-    task_info.parallel_thread_per_task = safe_get_config_str(cfg, "parallel_thread_per_task");
-    task_info.send_buffer_size = safe_get_config_str(cfg, "send_buffer_size");
-    //task_info.max_tuple_size   = safe_get_config_str(cfg, "max_tuple_size");
-    
-    // 必填项校验
-    if (!task_info.migrate_type)     { ReplyToClient(acceptSockfd,"migrate_type 缺失\n"); goto clean; }
-    if (!task_info.task_name)        { ReplyToClient(acceptSockfd,"task_name 缺失\n"); goto clean; }
-    if (!task_info.source_host)      { ReplyToClient(acceptSockfd,"source_host 缺失\n"); goto clean; }
-    if (!task_info.source_port)      { ReplyToClient(acceptSockfd,"source_port 缺失\n"); goto clean; }
-    if (!task_info.source_dbname)    { ReplyToClient(acceptSockfd,"source_dbname 缺失\n"); goto clean; }
-    if (!task_info.source_username)   { ReplyToClient(acceptSockfd,"source_username 缺失\n"); goto clean; }
-    if (!task_info.source_password)   { ReplyToClient(acceptSockfd,"source_password 缺失\n"); goto clean; }
-    if (!task_info.dest_host)        { ReplyToClient(acceptSockfd,"dest_host 缺失\n"); goto clean; }
-    if (!task_info.dest_port)        { ReplyToClient(acceptSockfd,"dest_port 缺失\n"); goto clean; }
-    if (!task_info.dest_dbname)      { ReplyToClient(acceptSockfd,"dest_dbname 缺失\n"); goto clean; }
-    if (!task_info.dest_username)    { ReplyToClient(acceptSockfd,"dest_username 缺失\n"); goto clean; }
-    if (!task_info.dest_password)    { ReplyToClient(acceptSockfd,"dest_password 缺失\n"); goto clean; }
-    if (!task_info.dest_table)       { ReplyToClient(acceptSockfd,"dest_table 缺失\n"); goto clean; }
-    if (!task_info.task_speed)       { ReplyToClient(acceptSockfd,"task_speed 缺失\n"); goto clean; }
-    if (!task_info.pump_sql)         { ReplyToClient(acceptSockfd,"pump_sql 缺失\n"); goto clean; }
- 
-    if (!task_info.parallel_thread_per_task) { ReplyToClient(acceptSockfd,"parallel_thread_per_task 缺失\n"); goto clean; }
-    if (!task_info.send_buffer_size) { ReplyToClient(acceptSockfd,"send_buffer_size 缺失\n"); goto clean; }
-    
-   
-
-
-
-
-
-    pid_t process_pid=getpid();
-    // 设置调速
-    int speed_val = atoi(task_info.task_speed);
-    //Set_sleepValue(speed_val, task_info.task_name);
-    fast_table_set_pid(task_info.task_name, speed_val,process_pid);    
-    char responsepid[16]  = {0};
-    char START_MESSAGE[1024] = {0};
-    snprintf(responsepid, sizeof(responsepid), "%d", process_pid);
-    snprintf(START_MESSAGE, sizeof(START_MESSAGE), "%s_%s_%s_%s\n",
-             TASK_CREATE_OK, task_info.task_name, responsepid, DataR_node_name);
-    ReplyToClient(acceptSockfd,START_MESSAGE);    
-   
-
-    
-    if (0 == Read_from_DB(task_info,acceptSockfd))
-    {
-        
-        //snprintf(replay_message, 1024, "%s_%s_%s_%s",task_info.task_name, responsepid, DataR_node_name);
-        //Del_sleep_tag(task_info.task_name);
-        fast_table_del(task_info.task_name,process_pid);
-     
-    
-    }
-    else
-    {
-        
-        ReplyToClient(acceptSockfd,"核心函数运行错误！\n");  
-        return -1;
-    }
-    printf("%s任务结束。\n",task_info.task_name);
-clean:
-    g_key_file_free(cfg);
-    return 0;
 }
 
 //=====================================================
@@ -384,7 +355,7 @@ int ctl_command_process(const char *ctl_message,int acceptSockfd)
     // ================= 每个命令分支都生成对应的回复 =================
     if (0 == memcmp(ctl_message, "--create", len_create))
     {
-
+    
         if(-1==create_Task(ctl_message,acceptSockfd)){
             //snprintf(replyBuf, replyBufLen, "ERROR: 任务已经存在，不要重复提交\n");
             ReplyToClient(acceptSockfd,"ERROR: 任务已经存在，不要重复提交\n");

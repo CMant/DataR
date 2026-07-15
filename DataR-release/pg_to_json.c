@@ -1,5 +1,5 @@
 /* ===================================================================
- *  pg_to_file.c — PG → SQL 文件迁移（基于 pg_engine）
+ *  pg_to_json.c — PG → JSON 文件迁移（基于 pg_engine）
  *
  *  TASK_INF 定义、创建、释放完全在此文件内。
  * =================================================================== */
@@ -7,6 +7,7 @@
 #include "include/pg_engine.h"
 #include "include/common.h"
 #include "include/network_service.h"
+#include "include/cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,9 +85,7 @@ static int my_write_exec(int tidnum, void *ctx, const char *buffer, long int siz
     (void)tidnum;
     WriteCtx *wc = (WriteCtx *)ctx;
     if (!wc || wc->fd < 0) return -1;
-    if (write(wc->fd, buffer, size) < 0) return -1;
-    if (write(wc->fd, ";\n", 2) < 0) return -1;
-    return 0;
+    return (write(wc->fd, buffer, size) < 0) ? -1 : 0;
 }
 
 static void my_write_fini(int tidnum, void *ctx)
@@ -117,18 +116,25 @@ static int my_gen_result(const PGresult *res, void *escape_conn,
     char *old_pos = *result_point;
     for (int row = 0; row < ntuples; row++)
     {
-        FastStrcat2(result_point, "(");
+        cJSON *obj = cJSON_CreateObject();
         for (int col = 0; col < nfields; col++)
         {
-            char *mx = PQgetvalue(res, row, col);
-            int col_sz = PQgetlength(res, row, col);
-            FastStrcat2(result_point, "'");
-            memcpy(*result_point, mx, col_sz);
-            *result_point += col_sz;
-            FastStrcat2(result_point, "',");
+            const char *cn = PQfname(res, col);
+            if (PQgetisnull(res, row, col))
+                cJSON_AddNullToObject(obj, cn);
+            else
+                cJSON_AddStringToObject(obj, cn, PQgetvalue(res, row, col));
         }
-        *result_point = *result_point - 1;
-        FastStrcat2(result_point, "),");
+        char *json_all = cJSON_PrintUnformatted(obj);
+        if (json_all)
+        {
+            FastStrcat2(result_point, json_all);
+            **result_point = '\n';
+            (*result_point)++;
+            **result_point = '\0';
+            free(json_all);
+        }
+        cJSON_Delete(obj);
     }
     return (int)(*result_point - old_pos);
 }
@@ -136,7 +142,7 @@ static int my_gen_result(const PGresult *res, void *escape_conn,
 /* ===================================================================
  *  入口函数
  * =================================================================== */
-int pg_to_file(int acceptSockfd)
+int pg_to_json(int acceptSockfd)
 {
     MyTaskCfg cfg;
     memset(&cfg, 0, sizeof(cfg));
@@ -169,9 +175,9 @@ int pg_to_file(int acceptSockfd)
     cb.write_exec          = my_write_exec;
     cb.write_fini          = my_write_fini;
     cb.get_buffer_prefix   = my_get_buffer_prefix;
-    cb.page_size            = 8192;
-    cb.speed_multiplier     = 0;
-    cb.use_half_buffer_check = 0;
+    cb.page_size            = 16384;
+    cb.speed_multiplier     = 1;
+    cb.use_half_buffer_check = 1;
 
     int ret = pg_engine_run(acceptSockfd,
                             cfg.task_name, cfg.pump_sql,

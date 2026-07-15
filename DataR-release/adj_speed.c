@@ -183,7 +183,7 @@ int fast_table_del(const char *task_name, const pid_t pid)
     memset(table[idx].name, 0, sizeof(table[idx].name));
     table[idx].speed = 0;
     table[idx].pid   = 0;  // 清空PID
-
+ 
     shm_detach(table);
     return 0;
 }
