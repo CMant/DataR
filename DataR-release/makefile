@@ -9,10 +9,9 @@ LDFLAGS         := -rdynamic -Wl,-rpath='$$ORIGIN/lib'
 PKG_CFLAGS      := $(shell pkg-config --cflags glib-2.0 libpq )
 PKG_LDLIBS      := $(shell pkg-config --libs   glib-2.0 libpq )
 
-# 新增 MySQL 头文件 + 库路径
 MYSQL_INC       := -I/usr/include/mysql
 MYSQL_LIB       := -L/usr/lib64/mysql -lmysqlclient
- 
+
 KAFKA_LIB 		:= -L/usr/lib64 -lrdkafka
 
 CFLAGS          += $(PKG_CFLAGS) $(MYSQL_INC)
@@ -33,86 +32,92 @@ OBJ             := common.o \
 # 动态库
 LIBPG           := libpg_to_pg.so
 LIBPG_TO_MYSQL  := libpg_to_mysql.so
+LIBPG_TO_FILE   := libpg_to_file.so
+LIBPG_TO_KAFKA  := libpg_to_kafka.so
+LIBPG_TO_JSON   := libpg_to_json.so
+LIBPG_TO_DORIS  := libpg_to_doris.so
 
 LIBPG_OBJ       := pg_to_pg.o  pg_engine.o
 LIBPG_MYSQL_OBJ := pg_to_mysql.o pg_engine.o
-
-LIBPG_TO_FILE   := libpg_to_file.so
 LIBPG_FILE_OBJ  := pg_to_file.o pg_engine.o
-
-LIBPG_TO_KAFKA  := libpg_to_kafka.so
 LIBPG_KAFKA_OBJ := pg_to_kafka.o
-
-LIBPG_TO_JSON   := libpg_to_json.so
 LIBPG_JSON_OBJ  := pg_to_json.o pg_engine.o
+LIBPG_DORIS_OBJ := pg_to_doris.o pg_engine.o
 
 DEPS            := $(patsubst %.o,%.d,$(OBJ)) \
                    $(patsubst %.o,%.d,$(LIBPG_OBJ)) \
                    $(patsubst %.o,%.d,$(LIBPG_MYSQL_OBJ)) \
                    $(patsubst %.o,%.d,$(LIBPG_FILE_OBJ)) \
                    $(patsubst %.o,%.d,$(LIBPG_KAFKA_OBJ)) \
-                   $(patsubst %.o,%.d,$(LIBPG_JSON_OBJ))
+                   $(patsubst %.o,%.d,$(LIBPG_JSON_OBJ)) \
+                   $(patsubst %.o,%.d,$(LIBPG_DORIS_OBJ))
 
 # ================================
 # 编译全部
 # ================================
-all: $(TARGET) $(LIBPG) $(LIBPG_TO_MYSQL) $(LIBPG_TO_FILE) $(LIBPG_TO_KAFKA) $(LIBPG_TO_JSON) copy_libs
+.PHONY: all clean copy_libs
+all: $(TARGET) $(LIBPG) $(LIBPG_TO_MYSQL) $(LIBPG_TO_FILE) $(LIBPG_TO_KAFKA) $(LIBPG_TO_JSON) $(LIBPG_TO_DORIS) copy_libs
 
 # 主程序
 $(TARGET): $(OBJ)
 	$(CC) -o $@ $^ $(LDFLAGS) $(PKG_LDLIBS) $(LDLIBS) $(MYSQL_LIB) $(KAFKA_LIB)
 
-# 动态库 libpg_to_pg.so
+# libpg_to_pg.so
 $(LIBPG): $(LIBPG_OBJ)
-	$(CC) -shared -o $@ $^
+	$(CC) -shared -o $@ $^ $(PKG_LDLIBS)
 	mkdir -p lib
 	mv $(LIBPG) lib/
 
-# 动态库 libpg_to_mysql.so
+# libpg_to_mysql.so
 $(LIBPG_TO_MYSQL): $(LIBPG_MYSQL_OBJ)
-	$(CC) -shared -o $@ $^ $(MYSQL_LIB) $(PKG_LDLIBS) -pthread  
+	$(CC) -shared -o $@ $^ $(MYSQL_LIB) $(PKG_LDLIBS) -pthread
 	mv $(LIBPG_TO_MYSQL) lib/
 
-# 动态库 libpg_to_file.so
+# libpg_to_file.so
 $(LIBPG_TO_FILE): $(LIBPG_FILE_OBJ)
-	$(CC) -shared -o $@ $^ 
+	$(CC) -shared -o $@ $^ $(PKG_LDLIBS)
 	mv $(LIBPG_TO_FILE) lib/
 
-# 动态库 libpg_to_kafka.so
-$(LIBPG_TO_KAFKA): $(LIBPG_KAFKA_OBJ) cJSON.o 
+# libpg_to_kafka.so
+$(LIBPG_TO_KAFKA): $(LIBPG_KAFKA_OBJ) cJSON.o
 	$(CC) -shared -o $@ $^ -lm -pthread $(PKG_LDLIBS) $(KAFKA_LIB)
 	mv $(LIBPG_TO_KAFKA) lib/
 
-# 动态库 libpg_to_json.so
-$(LIBPG_TO_JSON): $(LIBPG_JSON_OBJ) cJSON.o 
-	$(CC) -shared -o $@ $^ -lm -pthread 
+# libpg_to_json.so
+$(LIBPG_TO_JSON): $(LIBPG_JSON_OBJ) cJSON.o
+	$(CC) -shared -o $@ $^ -lm -pthread $(PKG_LDLIBS)
 	mv $(LIBPG_TO_JSON) lib/
 
+# libpg_to_doris.so
+$(LIBPG_TO_DORIS): $(LIBPG_DORIS_OBJ) cJSON.o
+	$(CC) -shared -o $@ $^ -lm -pthread $(PKG_LDLIBS)
+	mv $(LIBPG_TO_DORIS) lib/
+
 # ================================
-# 自动拷贝所有依赖库到 lib
+# 拷贝依赖库
 # ================================
 copy_libs: $(TARGET)
 	mkdir -p lib
-	ldd $(TARGET) | grep "=>" | awk '{print $$3}' | grep -v "libc.so.6" | xargs -I {} cp -n {} lib/ 2>/dev/null || true
+	ldd $(TARGET) | grep '=>' | awk '{if($$3!="") print $$3}' | grep -v libc.so.6 | xargs -I {} cp -n {} lib/ 2>/dev/null || true
 	cp -n /usr/lib64/librdkafka*.so* lib/ 2>/dev/null || true
-	@echo "所有依赖库已自动复制到 ./lib 目录"
+	@echo "依赖库复制完成 ./lib"
 
 # ================================
-# 通用规则
+# 通用编译规则（关键修复！）
 # ================================
-%.o: %.c %.d
+%.o: %.c
 	$(CC) -c $< -o $@ $(CFLAGS)
 
+# 原子写入 .d 临时文件，根治无限循环
 %.d: %.c
-	$(CC) -MM $< $(CFLAGS) > $@
+	$(CC) -MM -MT $*.o $(CFLAGS) $< > $@.tmp
+	mv $@.tmp $@
 
 -include $(DEPS)
 
 # ================================
 # 清理
 # ================================
-.PHONY: clean
 clean:
-	rm -f $(OBJ) $(DEPS) $(TARGET)
-	rm -f $(LIBPG_OBJ) $(LIBPG_MYSQL_OBJ) $(LIBPG_FILE_OBJ) $(LIBPG_KAFKA_OBJ) $(LIBPG_JSON_OBJ)
-	rm -rf lib/* *.so
+	rm -f *.o *.d *.d.tmp *.so $(TARGET)
+	rm -rf lib
